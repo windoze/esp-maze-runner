@@ -1,0 +1,43 @@
+[package]
+name = "esp-lcd-test"
+version = "0.1.0"
+authors = ["chenxu"]
+edition = "2021"
+resolver = "2"
+
+[profile.release]
+opt-level = "s"
+
+[profile.dev]
+debug = true    # Symbols are nice and they don't increase the size on Flash
+opt-level = "z"
+
+[features]
+pio = ["esp-idf-sys/pio"]
+
+[dependencies]
+anyhow = {version = "1", features = ["backtrace"]}
+thiserror = "1.0"
+log = "0.4"
+esp-idf-sys = { version = "0.32", features = ["binstart"] }
+esp-idf-svc = { version = "0.45", features = ["experimental"] }
+esp-idf-hal = { version = "0.40", features = []}
+embedded-svc = { version = "0.24", features = ["experimental"] }
+embedded-hal = "=1.0.0-alpha.9"
+embedded-hal-0-2 = { package = "embedded-hal", version = "0.2.7", features = ["unproven"] }
+embedded-graphics = { version = "0.7" }
+
+[build-dependencies]
+embuild = "0.31.1"
+
+[[package.metadata.esp-idf-sys.extra_components]]
+# component_dirs = ["lvgl_esp32_drivers"]
+component_dirs = ["lv"]
+# The bindgen is not usable until there is a new release of esp-idf-sys
+# @see https://github.com/esp-rs/esp-idf-sys/issues/180
+# bindings_header = "usb_util/usb_util.h"
+# bindings_module = "usb_util"
+
+[package.metadata.espflash]
+partition_table = "partitions_singleapp_large.csv" # Supports CSV and binary formats
+# format          = "direct-boot"    # Can be 'esp-bootloader' or 'direct-boot'
