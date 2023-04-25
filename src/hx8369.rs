@@ -1,7 +1,7 @@
 use std::{convert::Infallible, ffi::c_int};
 
 use embedded_graphics::{
-    pixelcolor::{raw::RawU16, Rgb565},
+    pixelcolor::Rgb565,
     prelude::{Dimensions, DrawTarget, Point, RgbColor, Size},
     primitives::Rectangle,
 };
@@ -35,24 +35,14 @@ extern "C" {
         color_data: *const u8,
     ) -> esp_err_t;
 
-    fn esp_lcd_panel_mirror(
-        panel: EspLcdPanelHandleT,
-        mirror_x: bool,
-        mirror_y: bool,
-    ) -> esp_err_t;
+    fn esp_lcd_panel_mirror(panel: EspLcdPanelHandleT, mirror_x: bool, mirror_y: bool)
+        -> esp_err_t;
 
     fn esp_lcd_panel_swap_xy(panel: EspLcdPanelHandleT, swap_axes: bool) -> esp_err_t;
 
-    fn esp_lcd_panel_set_gap(
-        panel: EspLcdPanelHandleT,
-        x_gap: c_int,
-        y_gap: c_int,
-    ) -> esp_err_t;
+    fn esp_lcd_panel_set_gap(panel: EspLcdPanelHandleT, x_gap: c_int, y_gap: c_int) -> esp_err_t;
 
-    fn esp_lcd_panel_invert_color(
-        panel: EspLcdPanelHandleT,
-        invert_color_data: bool,
-    ) -> esp_err_t;
+    fn esp_lcd_panel_invert_color(panel: EspLcdPanelHandleT, invert_color_data: bool) -> esp_err_t;
 
     fn esp_lcd_panel_disp_on_off(panel: EspLcdPanelHandleT, on_off: bool) -> esp_err_t;
 }
@@ -62,7 +52,7 @@ pub struct HX8369 {
 
     width: usize,
     height: usize,
-    buffer: Vec<RawU16>,
+    buffer: Vec<Rgb565>,
 }
 
 const LINES: usize = 60;
@@ -75,7 +65,7 @@ impl HX8369 {
             handle,
             width,
             height,
-            buffer: vec![Rgb565::BLACK.into(); width * height],
+            buffer: vec![Rgb565::BLACK; width * height],
         }
     }
 
@@ -87,6 +77,7 @@ impl HX8369 {
         y_end: i32,
         color_data: &T,
     ) -> i32 {
+        // info!("Drawing bitmap: ({}, {}) -> ({}, {})", x_start, y_start, x_end, y_end);
         unsafe {
             esp_lcd_panel_draw_bitmap(
                 self.handle,
@@ -134,6 +125,10 @@ impl HX8369 {
             }
         }
     }
+
+    pub fn get_raw_buffer(&mut self) -> &mut [Rgb565] {
+        &mut self.buffer
+    }
 }
 
 impl Dimensions for HX8369 {
@@ -158,7 +153,7 @@ impl DrawTarget for HX8369 {
             let x = p.0.x as usize;
             let y = p.0.y as usize;
             if x < self.width && y < self.height {
-                self.buffer[y * self.width + x] = p.1.into();
+                self.buffer[y * self.width + x] = p.1;
             }
         }
         Ok(())

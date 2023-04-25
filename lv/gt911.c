@@ -41,8 +41,11 @@
 #define CONFIG_LV_GT911_INVERT_Y 1
 #define CONFIG_LV_GT911_SWAPXY 1
 
+void GT911_RST();
 
-gt911_status_t gt911_status;
+gt911_status_t gt911_status = {
+    .inited = false,
+};
 
 //TODO: handle multibyte read and refactor to just one read transaction
 esp_err_t gt911_i2c_read(uint8_t slave_addr, uint16_t register_addr, uint8_t *data_buf, uint8_t len) {
