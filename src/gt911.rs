@@ -1,8 +1,3 @@
-use std::{
-    sync::atomic::AtomicPtr,
-    time::{Duration, Instant},
-};
-
 pub const GT911_I2C_SLAVE_ADDR: u8 = 0x5D;
 
 #[repr(C)]
@@ -62,52 +57,14 @@ pub struct TouchState {
     pub pressed: bool,
 }
 
-static LAST_CHECK_TOUCH: AtomicPtr<Instant> = AtomicPtr::new(core::ptr::null_mut());
-static LAST_TOUCH: AtomicPtr<TouchState> = AtomicPtr::new(core::ptr::null_mut());
-
-pub fn read_touch() -> Option<TouchState> {
-    let last_check = LAST_CHECK_TOUCH.load(core::sync::atomic::Ordering::Relaxed);
-    let last_check = if last_check.is_null() {
-        let last_check = Instant::now();
-        LAST_CHECK_TOUCH.store(
-            Box::into_raw(Box::new(last_check)),
-            core::sync::atomic::Ordering::Relaxed,
-        );
-        last_check
-    } else {
-        unsafe { *last_check }
-    };
-
-    if last_check.elapsed() < Duration::from_millis(10) {
-        let last_touch = LAST_TOUCH.load(core::sync::atomic::Ordering::Relaxed);
-        if last_touch.is_null() {
-            return Some(TouchState::default());
-        } else {
-            return None;
-        }
-    }
-
+pub fn read_touch() -> TouchState {
     let mut input = lv_indev_data_t::default();
     unsafe {
         gt911_read(&mut input);
     }
-    let ret = TouchState {
+    TouchState {
         x: input.point.x,
         y: input.point.y,
         pressed: input.state == lv_indev_state_t::LvIndevStatePressed,
-    };
-    LAST_CHECK_TOUCH.store(
-        Box::into_raw(Box::new(Instant::now())),
-        core::sync::atomic::Ordering::Relaxed,
-    );
-    let current = LAST_TOUCH.load(core::sync::atomic::Ordering::Relaxed);
-    if current.is_null() || unsafe { *current } != ret {
-        LAST_TOUCH.store(
-            Box::into_raw(Box::new(ret)),
-            core::sync::atomic::Ordering::Relaxed,
-        );
-        Some(ret)
-    } else {
-        None
     }
 }

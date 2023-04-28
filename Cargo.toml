@@ -16,7 +16,7 @@ opt-level = "z"
 default = ["eg"]
 pio = ["esp-idf-sys/pio"]
 sl = ["num-traits", "euclid", "slint", "i-slint-core", "slint-build"]
-eg = ["embedded-graphics"]
+eg = ["embedded-graphics", "rand", "tinybmp", "rusttype"]
 
 [dependencies]
 anyhow = {version = "1", features = ["backtrace"]}
@@ -33,6 +33,9 @@ num-traits = { version = "0.2", features = ["std"], optional = true }
 euclid = { version = "0.22", default-features = false, optional = true  }
 slint = { version = "1.0", default-features = false, features = ["compat-1-0", "unsafe-single-threaded"], optional = true  }
 i-slint-core = { version = "1.0", default-features = false, features = ["embedded-graphics"], optional = true  }
+rand = { version = "0.8", optional = true }
+tinybmp = { version = "0.4", optional = true }
+rusttype = { version = "0.9", optional = true }
 
 [build-dependencies]
 embuild = "0.31.1"

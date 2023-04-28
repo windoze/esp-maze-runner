@@ -1,5 +1,6 @@
 mod gt911;
 mod hx8369;
+mod utils;
 
 use esp_idf_sys as _;
 use log::info;
@@ -50,57 +51,104 @@ fn slint_demo() {
 #[cfg(feature = "eg")]
 fn eg_demo() {
     use embedded_graphics::{
+        image::Image,
         pixelcolor::Rgb565,
-        prelude::{Point, RgbColor, Size},
-        primitives::{Line, Primitive, PrimitiveStyle, PrimitiveStyleBuilder, Rectangle},
+        prelude::{DrawTarget, Point, RgbColor, Size},
+        primitives::{Primitive, PrimitiveStyleBuilder, Rectangle},
         transform::Transform,
-        Drawable,
+        Drawable, Pixel,
     };
+    use rand::{seq::SliceRandom, Rng};
+    use rusttype::{point, Font, Scale};
+    use tinybmp::Bmp;
 
-    use std::{thread, time::Duration};
+    use std::{iter::once, thread, time::Duration};
+
+    use crate::{gt911::TouchState, utils::Blend};
 
     let mut display = hx8369::HX8369::new(800, 480);
 
-    Line::new(Point::new(50, 20), Point::new(600, 350))
-        .into_styled(PrimitiveStyle::with_stroke(Rgb565::RED, 1))
+    display.fill(Rgb565::BLACK);
+
+    const COLORS: [Rgb565; 8] = [
+        Rgb565::RED,
+        Rgb565::GREEN,
+        Rgb565::BLUE,
+        Rgb565::CYAN,
+        Rgb565::MAGENTA,
+        Rgb565::YELLOW,
+        Rgb565::WHITE,
+        Rgb565::BLACK,
+    ];
+
+    let bmp_data = include_bytes!("../assets/test.bmp");
+    let bmp = Bmp::<Rgb565>::from_slice(bmp_data).unwrap();
+    Image::new(&bmp, Point::new(40, 0))
         .draw(&mut display)
         .unwrap();
 
-    // Green 10 pixel wide line with translation applied
-    Line::new(Point::new(50, 20), Point::new(600, 350))
-        .translate(Point::new(-30, 10))
-        .into_styled(PrimitiveStyle::with_stroke(Rgb565::GREEN, 10))
-        .draw(&mut display)
-        .unwrap();
+    let font_data = include_bytes!("../assets/wqy-microhei.ttc");
+    let font =
+        Font::try_from_bytes(font_data as &[u8]).expect("error constructing a Font from bytes");
 
-    let style = PrimitiveStyleBuilder::new()
-        .stroke_color(Rgb565::RED)
-        .stroke_width(3)
-        .fill_color(Rgb565::GREEN)
-        .build();
+    // Desired font pixel height
+    let height: f32 = 90.0;
+    let pixel_height = height.ceil() as usize;
 
-    Rectangle::new(Point::new(30, 200), Size::new(100, 150))
-        .into_styled(style)
-        .draw(&mut display)
-        .unwrap();
+    let scale = Scale {
+        x: height * 3.0,
+        y: height * 3.0,
+    };
 
-    // Rectangle with translation applied
-    Rectangle::new(Point::new(300, 20), Size::new(100, 150))
-        .translate(Point::new(-20, -10))
-        .into_styled(style)
-        .draw(&mut display)
-        .unwrap();
+    // The origin of a line of text is at the baseline (roughly where
+    // non-descending letters sit). We don't want to clip the text, so we shift
+    // it down with an offset when laying it out. v_metrics.ascent is the
+    // distance between the baseline and the highest edge of any glyph in
+    // the font. That's enough to guarantee that there's no clipping.
+    let v_metrics = font.v_metrics(scale);
+    let offset = point(0.0, v_metrics.ascent);
+
+    // Glyphs to draw for "RustType". Feel free to try other strings.
+    let glyphs: Vec<_> = font.layout("晴转多云，气温9-12°C", scale, offset).collect();
+
+    for g in glyphs {
+        if let Some(bb) = g.pixel_bounding_box() {
+            g.draw(|x, y, v| {
+                let x = x as i32 + bb.min.x;
+                let y = y as i32 + bb.min.y;
+                if v < 0.5 {
+                    return;
+                }
+                let background = display.get_pixel(x as usize, y as usize);
+                let foreground = Rgb565::new(255, 255, 255).blend(&background, v/2.0);
+                // let foreground = background.blend(&Rgb565::WHITE, v);
+                display
+                    .draw_iter(once(Pixel::<Rgb565>(Point { x, y }, foreground)))
+                    .unwrap();
+            })
+        }
+    }
 
     display.flush();
+
+    let mut last_touch = TouchState::default();
     loop {
-        if let Some(state) = gt911::read_touch() {
+        let state = gt911::read_touch();
+        if state != last_touch {
+            last_touch = state;
             info!("x: {}, y: {}, state: {:?}", state.x, state.y, state.pressed);
+            let style = PrimitiveStyleBuilder::new()
+                .stroke_color(*COLORS.choose(&mut rand::thread_rng()).unwrap())
+                .stroke_width(3)
+                .fill_color(*COLORS.choose(&mut rand::thread_rng()).unwrap())
+                .build();
+            let size: i32 = rand::thread_rng().gen_range(50..150);
             if state.pressed {
                 Rectangle::new(
                     Point::new(state.x as i32, state.y as i32),
-                    Size::new(100, 100),
+                    Size::new(size as u32, size as u32),
                 )
-                .translate(Point::new(-50, -50))
+                .translate(Point::new(-(size / 2), -(size / 2)))
                 .into_styled(style)
                 .draw(&mut display)
                 .unwrap();

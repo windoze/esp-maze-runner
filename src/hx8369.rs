@@ -1,4 +1,8 @@
-use std::{convert::Infallible, ffi::c_int};
+use std::{
+    cmp::{max, min},
+    convert::Infallible,
+    ffi::c_int,
+};
 
 use embedded_graphics::{
     pixelcolor::Rgb565,
@@ -53,6 +57,9 @@ pub struct HX8369 {
     width: usize,
     height: usize,
     buffer: Vec<Rgb565>,
+
+    min_y: usize,
+    max_y: usize,
 }
 
 const LINES: usize = 60;
@@ -66,6 +73,9 @@ impl HX8369 {
             width,
             height,
             buffer: vec![Rgb565::BLACK; width * height],
+
+            min_y: height,
+            max_y: 0,
         }
     }
 
@@ -77,7 +87,6 @@ impl HX8369 {
         y_end: i32,
         color_data: &T,
     ) -> i32 {
-        // info!("Drawing bitmap: ({}, {}) -> ({}, {})", x_start, y_start, x_end, y_end);
         unsafe {
             esp_lcd_panel_draw_bitmap(
                 self.handle,
@@ -110,24 +119,55 @@ impl HX8369 {
         unsafe { esp_lcd_panel_invert_color(self.handle, invert) };
     }
 
-    pub fn flush(&self) {
-        for i in 0..(self.height / LINES) {
+    pub fn flush(&mut self) {
+        // Nothing to flush
+        if self.min_y > self.max_y {
+            // Nothing to flush
+            return;
+        }
+        // HX8369 can only send ~100K bytes at once, about 800x62 pixels in RGB565 format
+        // so we need to split the buffer into chunks, LINES is set to 60 as we have screen height at 480
+        // Flush in chunks of LINES
+        for i in (self.min_y..self.max_y).step_by(LINES) {
             unsafe {
+                // Don't exceed screen bounds, as well as max_y
+                let y_end = min(min(i + LINES, self.height), self.max_y + 1);
+                // Swap start and end if needed
+                let y_start = min(i, y_end);
+                let y_end = max(i, y_end);
+                let y_end = min(y_end, self.height);
+                // Skip if nothing to flush
+                if y_start >= y_end {
+                    continue;
+                }
                 esp_lcd_panel_draw_bitmap(
                     self.handle,
                     0,
-                    (i * LINES) as i32,
+                    y_start as i32,
                     self.width as i32,
-                    (i * LINES + LINES) as i32,
-                    (&self.buffer.as_slice()[i * LINES * self.width..(i + 1) * LINES * self.width])
-                        as *const _ as *const u8,
+                    y_end as i32,
+                    (&self.buffer.as_slice()[y_start * self.width..y_end * self.width]) as *const _
+                        as *const u8,
                 );
             }
         }
+        self.min_y = self.height;
+        self.max_y = 0;
     }
 
     pub fn get_raw_buffer(&mut self) -> &mut [Rgb565] {
         &mut self.buffer
+    }
+
+    pub fn get_pixel(&self, x: usize, y: usize) -> Rgb565 {
+        self.buffer[y * self.width + x]
+    }
+
+    pub fn fill(&mut self, color: Rgb565) {
+        self.min_y = 0;
+        self.max_y = self.height;
+        self.buffer.iter_mut().for_each(|p| *p = color);
+        self.flush();
     }
 }
 
@@ -149,9 +189,20 @@ impl DrawTarget for HX8369 {
     where
         I: IntoIterator<Item = embedded_graphics::Pixel<Self::Color>>,
     {
+        // Record min and max dirty lines, the range in the middle will be flushed
+        // This is an optimization as the data transfer seems not to be fast enough, it takes around 4ms to flush the whole screen
         for p in pixels {
+            if p.0.x < 0 || p.0.y < 0 {
+                continue;
+            }
             let x = p.0.x as usize;
             let y = p.0.y as usize;
+            if self.min_y > y {
+                self.min_y = y;
+            }
+            if self.max_y < y {
+                self.max_y = y;
+            }
             if x < self.width && y < self.height {
                 self.buffer[y * self.width + x] = p.1;
             }
