@@ -1,29 +1,29 @@
-import { Button, VerticalBox } from "std-widgets.slint";
+import { ListView } from "std-widgets.slint";
 export component MainWindow {
     callback ok_button_clicked();
     width: 800px;
     height: 480px;
-    VerticalBox {
-        width: 100%;
-        Text {
-            text: "Hello World!";
-            font-size: 24px;
-            color: green;
-            horizontal-alignment: center;
-        }
-        Image {            
-            source: @image-url("slint-logo-full-light.svg");
-        }
-        HorizontalLayout {
-            alignment: center; 
-
-            Button {
-                width: 100px;
-                height: 200px;
-                text: "OK!";
-                clicked => { ok_button_clicked(); }
+    ListView {
+        width: 80%;
+        height: 100%;
+        for data in [
+            { text: "Blue", color: #0000ff, bg: #eeeeee},
+            { text: "Red", color: #ff0000, bg: #eeeeee},
+            { text: "Green", color: #00ff00, bg: #eeeeee},
+            { text: "Yellow", color: #ffff00, bg: #222222 },
+            { text: "Black", color: #000000, bg: #eeeeee },
+            { text: "White", color: #ffffff, bg: #222222 },
+            { text: "Magenta", color: #ff00ff, bg: #eeeeee },
+            { text: "Cyan", color: #00ffff, bg: #222222 },
+        ] : Rectangle {
+            height: 30px;
+            background: data.bg;
+            width: parent.width;
+            Text {
+                x: 0;
+                text: data.text;
+                color: data.color;
             }
-            Rectangle { background: yellow; horizontal-stretch: 1; }
         }
     }
 }

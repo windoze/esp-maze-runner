@@ -1,3 +1,5 @@
+use std::cell::Cell;
+
 pub const GT911_I2C_SLAVE_ADDR: u8 = 0x5D;
 
 #[repr(C)]
@@ -57,14 +59,39 @@ pub struct TouchState {
     pub pressed: bool,
 }
 
-pub fn read_touch() -> TouchState {
+#[derive(Copy, Clone, Debug)]
+struct TouchEvent {
+    timestamp: std::time::Instant,
+    state: TouchState,
+}
+
+static mut TOUCH_EVENT: Cell<Option<TouchEvent>> = Cell::new(None);
+
+pub fn read_touch() -> Option<TouchState> {
+    if let Some(event) = unsafe { TOUCH_EVENT.get_mut() } {
+        if event.timestamp.elapsed() < core::time::Duration::from_millis(10) {
+            return None;
+        }
+    }
+
     let mut input = lv_indev_data_t::default();
     unsafe {
         gt911_read(&mut input);
     }
-    TouchState {
+    let state = TouchState {
         x: input.point.x,
         y: input.point.y,
         pressed: input.state == lv_indev_state_t::LvIndevStatePressed,
+    };
+    let event = TouchEvent {
+        timestamp: std::time::Instant::now(),
+        state,
+    };
+    let old_state = unsafe { TOUCH_EVENT.replace(Some(event)) }
+        .map(|event| event.state)
+        .unwrap_or_default();
+    if state == old_state {
+        return None;
     }
+    Some(state)
 }

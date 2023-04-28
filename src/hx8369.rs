@@ -1,12 +1,15 @@
 use std::{
     cmp::{max, min},
-    convert::Infallible,
     ffi::c_int,
 };
 
+#[cfg(feature = "eg")]
+use std::convert::Infallible;
+
+#[cfg(feature = "eg")]
 use embedded_graphics::{
     pixelcolor::Rgb565,
-    prelude::{Dimensions, DrawTarget, Point, RgbColor, Size},
+    prelude::{Dimensions, DrawTarget, Point, Size},
     primitives::Rectangle,
 };
 
@@ -56,7 +59,7 @@ pub struct HX8369 {
 
     width: usize,
     height: usize,
-    buffer: Vec<Rgb565>,
+    buffer: Vec<u16>,
 
     min_y: usize,
     max_y: usize,
@@ -72,7 +75,7 @@ impl HX8369 {
             handle,
             width,
             height,
-            buffer: vec![Rgb565::BLACK; width * height],
+            buffer: vec![0; width * height],
 
             min_y: height,
             max_y: 0,
@@ -119,6 +122,19 @@ impl HX8369 {
         unsafe { esp_lcd_panel_invert_color(self.handle, invert) };
     }
 
+    pub fn get_width(&self) -> u32 {
+        self.width as u32
+    }
+
+    pub fn get_height(&self) -> u32 {
+        self.height as u32
+    }
+
+    pub fn invalidate(&mut self) {
+        self.min_y = 0;
+        self.max_y = self.height;
+    }
+
     pub fn flush(&mut self) {
         // Nothing to flush
         if self.min_y > self.max_y {
@@ -155,22 +171,42 @@ impl HX8369 {
         self.max_y = 0;
     }
 
-    pub fn get_raw_buffer(&mut self) -> &mut [Rgb565] {
-        &mut self.buffer
+    pub fn get_raw_buffer_mut<T>(&mut self) -> &mut [T] {
+        unsafe {
+            core::slice::from_raw_parts_mut(
+                self.buffer.as_mut_ptr() as *mut T,
+                self.buffer.len() * core::mem::size_of::<u16>() / core::mem::size_of::<T>(),
+            )
+        }
     }
 
+    pub fn get_raw_buffer<T>(&self) -> &[T] {
+        unsafe {
+            core::slice::from_raw_parts_mut(
+                self.buffer.as_ptr() as *mut T,
+                self.buffer.len() * core::mem::size_of::<u16>() / core::mem::size_of::<T>(),
+            )
+        }
+    }
+
+    #[cfg(feature = "eg")]
     pub fn get_pixel(&self, x: usize, y: usize) -> Rgb565 {
-        self.buffer[y * self.width + x]
+        let w = self.width;
+        self.get_raw_buffer()[y * w + x]
     }
 
+    #[cfg(feature = "eg")]
     pub fn fill(&mut self, color: Rgb565) {
         self.min_y = 0;
         self.max_y = self.height;
-        self.buffer.iter_mut().for_each(|p| *p = color);
+        self.get_raw_buffer_mut()
+            .iter_mut()
+            .for_each(|p| *p = color);
         self.flush();
     }
 }
 
+#[cfg(feature = "eg")]
 impl Dimensions for HX8369 {
     fn bounding_box(&self) -> embedded_graphics::primitives::Rectangle {
         Rectangle::new(
@@ -180,6 +216,7 @@ impl Dimensions for HX8369 {
     }
 }
 
+#[cfg(feature = "eg")]
 impl DrawTarget for HX8369 {
     type Color = Rgb565;
 
@@ -204,7 +241,8 @@ impl DrawTarget for HX8369 {
                 self.max_y = y;
             }
             if x < self.width && y < self.height {
-                self.buffer[y * self.width + x] = p.1;
+                let w = self.width;
+                self.get_raw_buffer_mut()[y * w + x] = p.1;
             }
         }
         Ok(())

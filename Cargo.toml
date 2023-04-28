@@ -16,7 +16,8 @@ opt-level = "z"
 default = ["eg"]
 pio = ["esp-idf-sys/pio"]
 sl = ["num-traits", "euclid", "slint", "i-slint-core", "slint-build"]
-eg = ["embedded-graphics", "rand", "tinybmp", "rusttype"]
+eg = ["embedded-graphics", "rand", "tinybmp"]
+ttf = ["rusttype"]
 
 [dependencies]
 anyhow = {version = "1", features = ["backtrace"]}

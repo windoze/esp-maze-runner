@@ -1,13 +1,12 @@
 use std::{cell::RefCell, rc::Rc, time::Instant};
 
+#[cfg(feature = "eg")]
 use embedded_graphics::prelude::Dimensions;
+use i_slint_core::software_renderer::Rgb565Pixel;
 use log::debug;
 use slint::platform::WindowEvent;
 
-use crate::{
-    gt911::read_touch,
-    hx8369::HX8369,
-};
+use crate::{gt911::read_touch, hx8369::HX8369};
 
 pub struct EspBackend {
     start: Instant,
@@ -41,8 +40,7 @@ impl slint::platform::Platform for EspBackend {
     fn run_event_loop(&self) -> Result<(), slint::PlatformError> {
         let mut display = HX8369::new(800, 480);
         display.flush();
-        let size = display.bounding_box().size;
-        let size = slint::PhysicalSize::new(size.width, size.height);
+        let size = slint::PhysicalSize::new(display.get_width(), display.get_height());
 
         self.window.borrow().as_ref().unwrap().set_size(size);
 
@@ -80,13 +78,14 @@ impl slint::platform::Platform for EspBackend {
                         }
                     }
                 }
-                let stride = display.bounding_box().size.width as usize;
-                let buffer = display.get_raw_buffer();
+                let stride = display.get_width() as usize;
+                let buffer: &mut [Rgb565Pixel] = display.get_raw_buffer_mut();
                 let dirty = window.draw_if_needed(|renderer| {
                     // renderer.render_by_line(&mut buffer_provider);
                     renderer.render(buffer, stride);
                 });
                 if dirty {
+                    display.invalidate();
                     display.flush();
                 }
                 if window.has_active_animations() {

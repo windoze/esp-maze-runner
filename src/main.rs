@@ -1,5 +1,7 @@
 mod gt911;
 mod hx8369;
+
+#[cfg(feature = "eg")]
 mod utils;
 
 use esp_idf_sys as _;
@@ -53,18 +55,18 @@ fn eg_demo() {
     use embedded_graphics::{
         image::Image,
         pixelcolor::Rgb565,
-        prelude::{DrawTarget, Point, RgbColor, Size},
+        prelude::{Point, RgbColor, Size},
         primitives::{Primitive, PrimitiveStyleBuilder, Rectangle},
         transform::Transform,
-        Drawable, Pixel,
+        Drawable,
     };
     use rand::{seq::SliceRandom, Rng};
+    #[cfg(feature = "ttf")]
     use rusttype::{point, Font, Scale};
     use tinybmp::Bmp;
 
-    use std::{iter::once, thread, time::Duration};
+    use std::{thread, time::Duration};
 
-    use crate::{gt911::TouchState, utils::Blend};
 
     let mut display = hx8369::HX8369::new(800, 480);
 
@@ -87,56 +89,60 @@ fn eg_demo() {
         .draw(&mut display)
         .unwrap();
 
-    let font_data = include_bytes!("../assets/wqy-microhei.ttc");
-    let font =
-        Font::try_from_bytes(font_data as &[u8]).expect("error constructing a Font from bytes");
-
-    // Desired font pixel height
-    let height: f32 = 90.0;
-    let pixel_height = height.ceil() as usize;
-
-    let scale = Scale {
-        x: height * 3.0,
-        y: height * 3.0,
-    };
-
-    // The origin of a line of text is at the baseline (roughly where
-    // non-descending letters sit). We don't want to clip the text, so we shift
-    // it down with an offset when laying it out. v_metrics.ascent is the
-    // distance between the baseline and the highest edge of any glyph in
-    // the font. That's enough to guarantee that there's no clipping.
-    let v_metrics = font.v_metrics(scale);
-    let offset = point(0.0, v_metrics.ascent);
-
-    // Glyphs to draw for "RustType". Feel free to try other strings.
-    let glyphs: Vec<_> = font.layout("晴转多云，气温9-12°C", scale, offset).collect();
-
-    for g in glyphs {
-        if let Some(bb) = g.pixel_bounding_box() {
-            g.draw(|x, y, v| {
-                let x = x as i32 + bb.min.x;
-                let y = y as i32 + bb.min.y;
-                if v < 0.5 {
-                    return;
-                }
-                let background = display.get_pixel(x as usize, y as usize);
-                let foreground = Rgb565::new(255, 255, 255).blend(&background, v/2.0);
-                // let foreground = background.blend(&Rgb565::WHITE, v);
-                display
-                    .draw_iter(once(Pixel::<Rgb565>(Point { x, y }, foreground)))
-                    .unwrap();
-            })
+    #[cfg(feature = "ttf")]
+    {
+        use crate::{gt911::TouchState, utils::Blend};
+        use embedded_graphics::prelude::DrawTarget;
+        use embedded_graphics::Pixel;
+        use std::iter::once;
+        let font_data = include_bytes!("../assets/wqy-microhei.ttc");
+        let font =
+            Font::try_from_bytes(font_data as &[u8]).expect("error constructing a Font from bytes");
+    
+        // Desired font pixel height
+        let height: f32 = 90.0;
+        let pixel_height = height.ceil() as usize;
+    
+        let scale = Scale {
+            x: height * 3.0,
+            y: height * 3.0,
+        };
+    
+        // The origin of a line of text is at the baseline (roughly where
+        // non-descending letters sit). We don't want to clip the text, so we shift
+        // it down with an offset when laying it out. v_metrics.ascent is the
+        // distance between the baseline and the highest edge of any glyph in
+        // the font. That's enough to guarantee that there's no clipping.
+        let v_metrics = font.v_metrics(scale);
+        let offset = point(0.0, v_metrics.ascent);
+    
+        // Glyphs to draw for "RustType". Feel free to try other strings.
+        let glyphs: Vec<_> = font.layout("晴转多云，气温9-12°C", scale, offset).collect();
+    
+        for g in glyphs {
+            if let Some(bb) = g.pixel_bounding_box() {
+                g.draw(|x, y, v| {
+                    let x = x as i32 + bb.min.x;
+                    let y = y as i32 + bb.min.y;
+                    if v < 0.5 {
+                        return;
+                    }
+                    let background = display.get_pixel(x as usize, y as usize);
+                    let foreground = Rgb565::new(255, 255, 255).blend(&background, v/2.0);
+                    // let foreground = background.blend(&Rgb565::WHITE, v);
+                    display
+                        .draw_iter(once(Pixel::<Rgb565>(Point { x, y }, foreground)))
+                        .unwrap();
+                })
+            }
         }
     }
 
     display.flush();
 
-    let mut last_touch = TouchState::default();
     loop {
-        let state = gt911::read_touch();
-        if state != last_touch {
-            last_touch = state;
-            info!("x: {}, y: {}, state: {:?}", state.x, state.y, state.pressed);
+        if let Some(state) = gt911::read_touch() {
+            info!("state: {:?}", state);
             let style = PrimitiveStyleBuilder::new()
                 .stroke_color(*COLORS.choose(&mut rand::thread_rng()).unwrap())
                 .stroke_width(3)
@@ -154,7 +160,8 @@ fn eg_demo() {
                 .unwrap();
                 display.flush();
             }
+        } else {
+            thread::sleep(Duration::from_millis(10));
         }
-        thread::sleep(Duration::from_millis(10));
     }
 }
