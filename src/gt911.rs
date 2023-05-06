@@ -1,4 +1,4 @@
-use std::cell::Cell;
+use std::sync::Mutex;
 
 pub const GT911_I2C_SLAVE_ADDR: u8 = 0x5D;
 
@@ -46,7 +46,7 @@ extern "C" {
     pub fn GT911_RST();
 
     // void gt911_init(uint8_t dev_addr);
-    pub fn gt911_init(dev_addr: u8);
+    pub fn gt911_init(dev_addr: u8) -> bool;
 
     // bool gt911_read(lv_indev_data_t *data);
     fn gt911_read(data: *mut lv_indev_data_t) -> bool;
@@ -65,10 +65,10 @@ struct TouchEvent {
     state: TouchState,
 }
 
-static mut TOUCH_EVENT: Cell<Option<TouchEvent>> = Cell::new(None);
+static mut TOUCH_EVENT: Mutex<Option<TouchEvent>> = Mutex::new(None);
 
 pub fn read_touch() -> Option<TouchState> {
-    if let Some(event) = unsafe { TOUCH_EVENT.get_mut() } {
+    if let Some(event) = unsafe { TOUCH_EVENT.lock().unwrap().as_ref().to_owned() } {
         if event.timestamp.elapsed() < core::time::Duration::from_millis(10) {
             return None;
         }
@@ -87,7 +87,7 @@ pub fn read_touch() -> Option<TouchState> {
         timestamp: std::time::Instant::now(),
         state,
     };
-    let old_state = unsafe { TOUCH_EVENT.replace(Some(event)) }
+    let old_state = unsafe { TOUCH_EVENT.lock().unwrap().replace(event) }
         .map(|event| event.state)
         .unwrap_or_default();
     if state == old_state {

@@ -64,7 +64,7 @@ esp_err_t gt911_i2c_write8(uint8_t slave_addr, uint16_t register_addr, uint8_t d
   * @param  dev_addr: Device address on communication Bus (I2C slave address of GT911).
   * @retval None
   */
-void gt911_init(uint8_t dev_addr) {
+bool gt911_init(uint8_t dev_addr) {
     if (!gt911_status.inited) {
         gt911_status.i2c_dev_addr = dev_addr;
         uint8_t data_buf;
@@ -74,7 +74,7 @@ void gt911_init(uint8_t dev_addr) {
         if ((ret = gt911_i2c_read(dev_addr, GT911_PRODUCT_ID1, &data_buf, 1) != ESP_OK)) {
             ESP_LOGE(TAG, "Error reading from device: %s",
                         esp_err_to_name(ret));    // Only show error the first time
-            return;
+            return false;
         }
 
         // Read 4 bytes for Product ID in ASCII
@@ -99,6 +99,7 @@ void gt911_init(uint8_t dev_addr) {
         ESP_LOGI(TAG, "\tY Resolution: %d", gt911_status.max_y_coord);
         gt911_status.inited = true;
     }
+    return gt911_status.inited;
 }
 
 /**

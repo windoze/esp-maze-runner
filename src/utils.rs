@@ -1,4 +1,7 @@
-use embedded_graphics::{pixelcolor::Rgb888, prelude::RgbColor};
+use embedded_graphics::{
+    pixelcolor::Rgb888,
+    prelude::RgbColor,
+};
 
 pub trait Blend {
     fn blend<U>(&self, other: &U, alpha: f32) -> Self

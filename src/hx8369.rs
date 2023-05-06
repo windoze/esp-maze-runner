@@ -3,10 +3,8 @@ use std::{
     ffi::c_int,
 };
 
-#[cfg(feature = "eg")]
 use std::convert::Infallible;
 
-#[cfg(feature = "eg")]
 use embedded_graphics::{
     pixelcolor::Rgb565,
     prelude::{Dimensions, DrawTarget, Point, Size},
@@ -189,13 +187,14 @@ impl HX8369 {
         }
     }
 
-    #[cfg(feature = "eg")]
     pub fn get_pixel(&self, x: usize, y: usize) -> Rgb565 {
+        if x >= self.width || y >= self.height {
+            return <Rgb565 as embedded_graphics::prelude::RgbColor>::BLACK;
+        }
         let w = self.width;
         self.get_raw_buffer()[y * w + x]
     }
 
-    #[cfg(feature = "eg")]
     pub fn fill(&mut self, color: Rgb565) {
         self.min_y = 0;
         self.max_y = self.height;
@@ -206,7 +205,22 @@ impl HX8369 {
     }
 }
 
-#[cfg(feature = "eg")]
+pub trait DrawCanvas {
+    type PixelColor: Clone
+        + Copy
+        + embedded_graphics::prelude::RgbColor
+        + From<embedded_graphics::pixelcolor::Rgb888>
+        + Into<embedded_graphics::pixelcolor::Rgb888>;
+    fn get_pixel(&self, x: usize, y: usize) -> Self::PixelColor;
+}
+
+impl DrawCanvas for HX8369 {
+    type PixelColor = Rgb565;
+    fn get_pixel(&self, x: usize, y: usize) -> Self::PixelColor {
+        self.get_pixel(x, y)
+    }
+}
+
 impl Dimensions for HX8369 {
     fn bounding_box(&self) -> embedded_graphics::primitives::Rectangle {
         Rectangle::new(
@@ -216,7 +230,6 @@ impl Dimensions for HX8369 {
     }
 }
 
-#[cfg(feature = "eg")]
 impl DrawTarget for HX8369 {
     type Color = Rgb565;
 
@@ -234,6 +247,9 @@ impl DrawTarget for HX8369 {
             }
             let x = p.0.x as usize;
             let y = p.0.y as usize;
+            if x >= self.width || y >= self.height {
+                continue;
+            }
             if self.min_y > y {
                 self.min_y = y;
             }
