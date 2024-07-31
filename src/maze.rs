@@ -89,9 +89,9 @@ impl Maze {
     pub fn generate(&mut self, x: usize, y: usize) {
         let mut stack = Vec::with_capacity(self.width * self.height);
         stack.push((x, y));
-        while !stack.is_empty() {
-            // Pop the current cell
-            let (x, y) = stack.pop().unwrap();
+
+        // Pop the current cell
+        while let Some((x, y)) = stack.pop() {
             // Mark the current cell as visited
             self[(x, y)].visited = true;
             // Get the unvisited neighbors with visited neighbors

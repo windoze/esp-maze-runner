@@ -1,97 +1,267 @@
-use std::sync::Mutex;
+/// A minimal implementation of the GT911 to work with Lvgl since Lvgl only uses a single touch point
+/// The default orientation and size are based on the aliexpress ESP 7 inch capactive touch development
+/// board model ESP-8048S070C
+use embedded_hal::{
+    delay::DelayNs,
+    digital::OutputPin,
+    i2c::{I2c, SevenBitAddress},
+};
 
-pub const GT911_I2C_SLAVE_ADDR: u8 = 0x5D;
+const DEFAULT_GT911_ADDRESS: u8 = 0x5d;
 
-#[repr(C)]
-#[derive(Copy, Clone, Debug, Default)]
-struct lv_point_t {
-    pub x: i16,
-    pub y: i16,
+/// Documented registers of the device
+#[allow(dead_code)]
+#[repr(u16)]
+#[derive(Debug, Clone, Copy)]
+enum Reg {
+    ProductId = 0x8140,
+    PointInfo = 0x814E,
+    Point1 = 0x814F,
 }
 
-// typedef enum {
-//     LV_INDEV_STATE_RELEASED = 0,
-//     LV_INDEV_STATE_PRESSED
-// } lv_indev_state_t;
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
-enum lv_indev_state_t {
-    #[default]
-    LvIndevStateReleased = 0,
-    LvIndevStatePressed,
-}
-
-// typedef struct {
-//     lv_point_t point; /**< For LV_INDEV_TYPE_POINTER the currently pressed point*/
-//     uint32_t key;     /**< For LV_INDEV_TYPE_KEYPAD the currently pressed key*/
-//     uint32_t btn_id;  /**< For LV_INDEV_TYPE_BUTTON the currently pressed button*/
-//     int16_t enc_diff; /**< For LV_INDEV_TYPE_ENCODER number of steps since the previous read*/
-//     lv_indev_state_t state; /**< LV_INDEV_STATE_REL or LV_INDEV_STATE_PR*/
-//     bool continue_reading;  /**< If set to true, the read callback is invoked again*/
-// } lv_indev_data_t;
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, Default)]
-struct lv_indev_data_t {
-    pub point: lv_point_t,
-    pub key: u32,
-    pub btn_id: u32,
-    pub enc_diff: i16,
-    pub state: lv_indev_state_t,
-    pub continue_reading: bool,
-}
-
-extern "C" {
-    pub fn GT911_RST();
-
-    // void gt911_init(uint8_t dev_addr);
-    pub fn gt911_init(dev_addr: u8) -> bool;
-
-    // bool gt911_read(lv_indev_data_t *data);
-    fn gt911_read(data: *mut lv_indev_data_t) -> bool;
-}
-
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
-pub struct TouchState {
-    pub x: i16,
-    pub y: i16,
-    pub pressed: bool,
-}
-
+/// Represents the orientation of the device
+#[allow(dead_code)]
 #[derive(Copy, Clone, Debug)]
-struct TouchEvent {
-    timestamp: std::time::Instant,
-    state: TouchState,
+pub enum Orientation {
+    Portrait, // Do Not use
+    Landscape,
+    InvertedPortrait, // Do Not use
+    InvertedLandscape,
 }
 
-static mut TOUCH_EVENT: Mutex<Option<TouchEvent>> = Mutex::new(None);
+/// Represents the dimensions of the device
+#[derive(Copy, Clone, Debug)]
+pub struct Dimension {
+    pub height: u16,
+    pub width: u16,
+}
 
-pub fn read_touch() -> Option<TouchState> {
-    if let Some(event) = unsafe { TOUCH_EVENT.lock().unwrap().as_ref().to_owned() } {
-        if event.timestamp.elapsed() < core::time::Duration::from_millis(10) {
-            return None;
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct TouchPoint {
+    pub id: u8,
+    pub x: u16,
+    pub y: u16,
+    pub size: u16,
+}
+
+#[derive(Clone, Debug)]
+pub struct GT911Builder<I2C, RST, DELAY>
+where
+    I2C: I2c<SevenBitAddress>,
+    RST: OutputPin,
+    DELAY: DelayNs,
+{
+    address: u8,
+    i2c: I2C,
+    reset_pin: RST,
+    delay: DELAY,
+    orientation: Orientation,
+    size: Dimension,
+}
+
+impl<I2C, RST, DELAY> GT911Builder<I2C, RST, DELAY>
+where
+    I2C: I2c<SevenBitAddress>,
+    RST: OutputPin,
+    DELAY: DelayNs,
+{
+    pub fn new(i2c: I2C, reset_pin: RST, delay: DELAY) -> Self {
+        Self {
+            address: DEFAULT_GT911_ADDRESS,
+            i2c,
+            reset_pin,
+            delay,
+            orientation: Orientation::Landscape,
+            size: Dimension {
+                height: 480,
+                width: 800,
+            },
         }
     }
 
-    let mut input = lv_indev_data_t::default();
-    unsafe {
-        gt911_read(&mut input);
+    pub fn address(mut self, address: u8) -> Self {
+        self.address = address;
+        self
     }
-    let state = TouchState {
-        x: input.point.x,
-        y: input.point.y,
-        pressed: input.state == lv_indev_state_t::LvIndevStatePressed,
-    };
-    let event = TouchEvent {
-        timestamp: std::time::Instant::now(),
-        state,
-    };
-    let old_state = unsafe { TOUCH_EVENT.lock().unwrap().replace(event) }
-        .map(|event| event.state)
-        .unwrap_or_default();
-    if state == old_state {
-        return None;
+
+    pub fn orientation(mut self, orientation: Orientation) -> Self {
+        self.orientation = orientation;
+        self
     }
-    Some(state)
+
+    pub fn size(mut self, width: u16, height: u16) -> Self {
+        self.size = Dimension { height, width };
+        self
+    }
+
+    pub fn build(self) -> GT911<I2C, RST, DELAY> {
+        GT911 {
+            address: self.address,
+            i2c: self.i2c,
+            reset_pin: self.reset_pin,
+            delay: self.delay,
+            orientation: self.orientation,
+            size: self.size,
+        }
+    }
+}
+
+/// Driver representation holding:
+///
+/// - The I2C Slave address of the GT911
+/// - The I2C Bus used to communicate with the GT911
+/// - The reset pin on the GT911
+/// - The delay used by the reset pin to reset the GT911
+/// - The screen/panel orientation
+/// - The scree/panel dimesions
+#[derive(Clone, Debug)]
+pub struct GT911<I2C, RST, DELAY>
+where
+    I2C: I2c<SevenBitAddress>,
+    RST: OutputPin,
+    DELAY: DelayNs,
+{
+    address: u8,
+    i2c: I2C,
+    reset_pin: RST,
+    delay: DELAY,
+    orientation: Orientation,
+    size: Dimension,
+}
+
+#[allow(dead_code)]
+impl<I2C, RST, DELAY> GT911<I2C, RST, DELAY>
+where
+    I2C: I2c<SevenBitAddress>,
+    RST: OutputPin,
+    DELAY: DelayNs,
+{
+    pub fn new(i2c: I2C, reset_pin: RST, delay: DELAY) -> Self {
+        Self {
+            address: DEFAULT_GT911_ADDRESS,
+            i2c,
+            reset_pin,
+            delay,
+            orientation: Orientation::InvertedPortrait,
+            size: Dimension {
+                height: 480,
+                width: 800,
+            },
+        }
+    }
+
+    pub fn reset(&mut self) -> Result<(), <RST as embedded_hal::digital::ErrorType>::Error> {
+        //println!("======= Resetting GT911 =======");
+        self.delay.delay_ms(5);
+        self.reset_pin.set_high()?;
+        self.delay.delay_ms(5);
+        self.reset_pin.set_low()?;
+        self.delay.delay_us(5);
+        self.reset_pin.set_high()?;
+        self.delay.delay_ms(5);
+
+        Ok(())
+    }
+
+    // Useful function to determine if you are communicating with GT911, The GT911 must first be reset.
+    // The return string should be - 911
+    pub fn read_product_id(
+        &mut self,
+    ) -> Result<String, <I2C as embedded_hal::i2c::ErrorType>::Error> {
+        let mut rx_buf: [u8; 4] = [0; 4];
+
+        let product_id_reg: u16 = Reg::ProductId as u16;
+
+        let hi_byte: u8 = (product_id_reg >> 8).try_into().unwrap();
+        let lo_byte: u8 = (product_id_reg & 0xFF).try_into().unwrap();
+        let tx_buf: [u8; 2] = [hi_byte, lo_byte];
+
+        self.i2c.write_read(self.address, &tx_buf, &mut rx_buf)?;
+
+        Ok(std::str::from_utf8(&rx_buf).unwrap().to_string())
+    }
+
+    pub fn read_touch(
+        &mut self,
+    ) -> Result<Option<TouchPoint>, <I2C as embedded_hal::i2c::ErrorType>::Error> {
+        let mut rx_buf: [u8; 1] = [0xFF];
+
+        let point_info_reg: u16 = Reg::PointInfo as u16;
+        let hi_byte: u8 = (point_info_reg >> 8).try_into().unwrap();
+        let lo_byte: u8 = (point_info_reg & 0xFF).try_into().unwrap();
+        let tx_buf: [u8; 2] = [hi_byte, lo_byte];
+
+        self.i2c.write_read(self.address, &tx_buf, &mut rx_buf)?;
+
+        let point_info = rx_buf[0];
+        let buffer_status = point_info >> 7 & 1u8;
+        let touches = point_info & 0x7;
+
+        //println!("point info = {:x?}", point_info);
+        //println!("bufferStatus = {:?}", point_info >> 7 & 1u8);
+        //println!("largeDetect = {:?}", point_info >> 6 & 1u8);
+        //println!("proximityValid = {:?}", point_info >> 5 & 1u8);
+        //println!("HaveKey = {:?}", point_info >> 4 & 1u8);
+        //println!("touches = {:?}", point_info & 0xF);
+
+        let is_touched: bool = buffer_status == 1 && touches > 0;
+
+        let mut tp: TouchPoint = TouchPoint {
+            id: 0,
+            x: 0,
+            y: 0,
+            size: 0,
+        };
+
+        if is_touched {
+            tp = self.read_touch_point(Reg::Point1 as u16)?;
+        }
+
+        // Reset point_info register after reading it
+        let tx_buf: [u8; 3] = [hi_byte, lo_byte, 0u8];
+        self.i2c.write(self.address, &tx_buf)?;
+
+        Ok(if is_touched { Some(tp) } else { None })
+    }
+
+    pub fn read_touch_point(
+        &mut self,
+        point_register: u16,
+    ) -> Result<TouchPoint, <I2C as embedded_hal::i2c::ErrorType>::Error> {
+        let hi_byte: u8 = (point_register >> 8).try_into().unwrap();
+        let lo_byte: u8 = (point_register & 0xFF).try_into().unwrap();
+        let tx_buf: [u8; 2] = [hi_byte, lo_byte];
+
+        let mut rx_buf: [u8; 7] = [0; 7];
+        self.i2c.write_read(self.address, &tx_buf, &mut rx_buf)?;
+
+        let id: u8 = rx_buf[0];
+        let mut x: u16 = rx_buf[1] as u16 + ((rx_buf[2] as u16) << 8);
+        let mut y: u16 = rx_buf[3] as u16 + ((rx_buf[4] as u16) << 8);
+        let size: u16 = rx_buf[5] as u16 + ((rx_buf[6] as u16) << 8);
+
+        //println!("========== x = {:?}    y = {:?} ==========", x, y);
+
+        match self.orientation {
+            Orientation::Landscape => {
+                // Don't need to do anything because x = x and y = y
+            }
+            Orientation::Portrait => {
+                let temp: u16 = x;
+                x = y;
+                y = self.size.height - temp;
+            }
+            Orientation::InvertedLandscape => {
+                x = self.size.width - x;
+                y = self.size.height - y;
+            }
+            Orientation::InvertedPortrait => {
+                let temp: u16 = x;
+                x = self.size.width - y;
+                y = temp;
+            }
+        }
+
+        Ok(TouchPoint { id, x, y, size })
+    }
 }

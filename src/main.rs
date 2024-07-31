@@ -1,14 +1,19 @@
 use std::{thread, time::Duration};
 
+use embedded_graphics::Drawable;
 use embedded_graphics::{
-    pixelcolor::Rgb565,
-    prelude::Size,
-    prelude::{Point, RgbColor},
+    geometry::{Point, Size},
+    pixelcolor::{Rgb565, RgbColor},
     primitives::PrimitiveStyleBuilder,
-    Drawable,
 };
-
-use esp_idf_sys as _;
+use esp_idf_svc::hal::{
+    delay::Ets,
+    gpio::PinDriver,
+    i2c::{I2cConfig, I2cDriver},
+    peripherals::Peripherals,
+    units::FromValueType,
+};
+use gt911::GT911Builder;
 use log::info;
 use maze_painter::MazePainter;
 
@@ -16,33 +21,50 @@ mod gt911;
 mod hx8369;
 mod maze;
 mod maze_painter;
-mod utils;
 
-fn main() {
+const SCREEN_WIDTH: usize = 800;
+const SCREEN_HEIGHT: usize = 480;
+const CELL_SIZE: usize = 20;
+const MAZE_WIDTH: usize = 38;
+const MAZE_HEIGHT: usize = 22;
+const X_OFFSET: u16 = 25;
+const Y_OFFSET: u16 = 20;
+
+fn main() -> anyhow::Result<()> {
     // It is necessary to call this function once. Otherwise some patches to the runtime
     // implemented by esp-idf-sys might not link properly. See https://github.com/esp-rs/esp-idf-template/issues/71
-    esp_idf_sys::link_patches();
+    esp_idf_svc::sys::link_patches();
+
+    // Bind the log crate to the ESP Logging facilities
     esp_idf_svc::log::EspLogger::initialize_default();
 
-    unsafe {
-        while !gt911::gt911_init(gt911::GT911_I2C_SLAVE_ADDR) {
-            info!("GT911 init failed, retrying...");
-            thread::sleep(Duration::from_millis(100));
-            gt911::GT911_RST();
-        }
-    };
+    log::info!("Hello, world!");
 
-    info!("Running demo");
+    let peripherals = Peripherals::take()?;
+    let pins = peripherals.pins;
 
-    run_maze();
-}
+    let i2c = peripherals.i2c0;
+    let sda = pins.gpio39;
+    let scl = pins.gpio38;
+    let config = I2cConfig::new().baudrate(100.kHz().into());
+    let i2c = I2cDriver::new(i2c, sda, scl, &config)?;
+    let rst = PinDriver::output(pins.gpio4)?; // reset pin on GT911
+    let builder = GT911Builder::new(i2c, rst, Ets)
+        .address(0x5d)
+        .orientation(gt911::Orientation::InvertedPortrait)
+        .size(SCREEN_WIDTH as u16, SCREEN_HEIGHT as u16);
+    let mut touch_screen = builder.build();
 
-fn run_maze() {
-    let mut display = hx8369::HX8369::new(800, 480);
+    // The board needs to set the pin 6 to high before resetting the touch screen
+    PinDriver::output(pins.gpio6)?.set_high()?;
+    thread::sleep(Duration::from_millis(5));
+    touch_screen.reset()?;
+
+    let mut display = hx8369::HX8369::new(SCREEN_WIDTH, SCREEN_HEIGHT);
 
     display.fill(Rgb565::BLACK);
 
-    let mut maze = maze::Maze::new(38, 22);
+    let mut maze = maze::Maze::new(MAZE_WIDTH, MAZE_HEIGHT);
     maze.generate(0, 0);
 
     let style = PrimitiveStyleBuilder::new()
@@ -51,8 +73,11 @@ fn run_maze() {
         .stroke_width(1)
         .build();
 
-    let offset = Point { x: 25, y: 20 };
-    let cell_size = Size::new(20, 20);
+    let offset = Point {
+        x: X_OFFSET as i32,
+        y: Y_OFFSET as i32,
+    };
+    let cell_size = Size::new(CELL_SIZE as u32, CELL_SIZE as u32);
 
     let mut painter = MazePainter::new(maze, style, cell_size, offset);
 
@@ -66,13 +91,11 @@ fn run_maze() {
         .build();
 
     loop {
-        if let Some(state) = gt911::read_touch() {
-            info!("state: {:?}", state);
-            if state.pressed
-                && painter.on_click(state.x as i32, state.y as i32, style, &mut display)
-            {
-                display.flush();
-            }
+        let touch = touch_screen.read_touch()?;
+        if let Some(point) = touch {
+            info!("state: {:?}", point);
+            painter.on_click(point.x as i32, point.y as i32, style, &mut display);
+            display.flush();
         } else {
             thread::sleep(Duration::from_millis(10));
         }
