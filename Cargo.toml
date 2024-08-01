@@ -40,3 +40,4 @@ embuild = "0.32.0"
 
 [[package.metadata.esp-idf-sys.extra_components]]
 component_dirs = ["hx8369"]
+bindings_header = "hx8369/hx8369.h"
