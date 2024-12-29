@@ -1,0 +1,17 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**"
+            ],
+            "defines": [],
+            "compilerPath": "/usr/bin/clang",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "linux-clang-x64",
+            "compileCommands": "${workspaceFolder}/target/xtensa-esp32s3-espidf/release/build/esp-idf-sys-78ca1aca66f3d87b/out/build/compile_commands.json"
+        }
+    ],
+    "version": 4
+}

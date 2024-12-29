@@ -1,7 +1,4 @@
-/.vscode
 /.embuild
 /target
-/Cargo.lock
-/.vscode
 .autoenv*
 .env*
