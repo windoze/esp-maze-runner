@@ -1,11 +1,5 @@
 use std::{thread, time::Duration};
 
-use embedded_graphics::Drawable;
-use embedded_graphics::{
-    geometry::{Point, Size},
-    pixelcolor::{Rgb565, RgbColor},
-    primitives::PrimitiveStyleBuilder,
-};
 use esp_idf_svc::hal::{
     delay::Ets,
     gpio::PinDriver,
@@ -14,21 +8,25 @@ use esp_idf_svc::hal::{
     units::FromValueType,
 };
 use gt911::GT911Builder;
-use log::info;
-use maze_painter::MazePainter;
-
+use hx8369::{Backend, DisplayWrapper};
+use slint::PhysicalSize;
+use slint::{platform::software_renderer as renderer, SharedPixelBuffer};
+use slint::{
+    platform::software_renderer::{MinimalSoftwareWindow, Rgb565Pixel},
+    Rgb8Pixel,
+};
+use zune_jpeg::JpegDecoder;
 mod gt911;
 mod hx8369;
-mod maze;
-mod maze_painter;
+// mod maze;
+// mod maze_painter;
 
 const SCREEN_WIDTH: usize = 800;
 const SCREEN_HEIGHT: usize = 480;
-const CELL_SIZE: usize = 20;
-const MAZE_WIDTH: usize = 38;
-const MAZE_HEIGHT: usize = 22;
-const X_OFFSET: u16 = 25;
-const Y_OFFSET: u16 = 20;
+
+const WALLPAPER: &[u8] = include_bytes!("../ui/assets/background.jpg");
+
+slint::include_modules!();
 
 fn main() -> anyhow::Result<()> {
     // It is necessary to call this function once. Otherwise some patches to the runtime
@@ -61,43 +59,48 @@ fn main() -> anyhow::Result<()> {
     touch_screen.reset()?;
 
     let mut display = hx8369::HX8369::new(SCREEN_WIDTH, SCREEN_HEIGHT);
+    let window = MinimalSoftwareWindow::new(renderer::RepaintBufferType::ReusedBuffer);
+    slint::platform::set_platform(Box::new(Backend::new(window.clone()))).unwrap();
+    window.set_size(PhysicalSize::new(800, 480));
 
-    display.fill(Rgb565::BLACK);
+    let ui = AppWindow::new().unwrap();
+    let _handle = ui.as_weak();
 
-    let mut maze = maze::Maze::new(MAZE_WIDTH, MAZE_HEIGHT);
-    maze.generate(0, 0);
-
-    let style = PrimitiveStyleBuilder::new()
-        .fill_color(Rgb565::YELLOW)
-        .stroke_color(Rgb565::WHITE)
-        .stroke_width(1)
-        .build();
-
-    let offset = Point {
-        x: X_OFFSET as i32,
-        y: Y_OFFSET as i32,
+    let mut line_buffer = [Rgb565Pixel(0); SCREEN_WIDTH];
+    let mut wrapper = DisplayWrapper {
+        display: &mut display,
+        line_buffer: &mut line_buffer,
     };
-    let cell_size = Size::new(CELL_SIZE as u32, CELL_SIZE as u32);
 
-    let mut painter = MazePainter::new(maze, style, cell_size, offset);
+    let mut decoder = JpegDecoder::new(WALLPAPER);
+    let pixels = decoder
+        .decode()
+        .inspect_err(|e| {
+            log::error!("Error decoding image: {:?}", e);
+        })
+        .unwrap();
+    let buffer = SharedPixelBuffer::<Rgb8Pixel>::clone_from_slice(
+        pixels.as_slice(),
+        decoder.info().unwrap().width as u32,
+        decoder.info().unwrap().height as u32,
+    );
+    let image = slint::Image::from_rgb8(buffer);
 
-    painter.draw(&mut display).ok();
-
-    display.flush();
-
-    let style = PrimitiveStyleBuilder::new()
-        .stroke_color(Rgb565::GREEN)
-        .stroke_width(3)
-        .build();
-
+    let mut flag = false;
     loop {
-        let touch = touch_screen.read_touch()?;
-        if let Some(point) = touch {
-            info!("state: {:?}", point);
-            painter.on_click(point.x as i32, point.y as i32, style, &mut display);
-            display.flush();
-        } else {
-            thread::sleep(Duration::from_millis(10));
+        slint::platform::update_timers_and_animations();
+
+        // Draw the scene if something needs to be drawn.
+        window.draw_if_needed(|renderer| {
+            renderer.render_by_line(&mut wrapper);
+        });
+
+        if !window.has_active_animations() {
+            // if no animation is running, wait for the next input event
+        }
+        if !flag {
+            flag = true;
+            ui.global::<AppData>().set_background(image.clone());
         }
     }
 }

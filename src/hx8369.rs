@@ -95,7 +95,7 @@ impl HX8369 {
 
     pub fn invalidate(&mut self) {
         self.min_dirty_y = 0;
-        self.max_dirty_y = self.height;
+        self.max_dirty_y = self.height - 1;
     }
 
     pub fn flush(&mut self) {
@@ -107,7 +107,7 @@ impl HX8369 {
         // HX8369 can only send ~100K bytes at once, about 800x62 pixels in RGB565 format
         // so we need to split the buffer into chunks, LINES is set to 60 as we have screen height at 480
         // Flush in chunks of LINES
-        for i in (self.min_dirty_y..self.max_dirty_y).step_by(LINES) {
+        for i in (self.min_dirty_y..self.max_dirty_y + 1).step_by(LINES) {
             unsafe {
                 // Don't exceed screen bounds, as well as max_y
                 let y_end = min(min(i + LINES, self.height), self.max_dirty_y + 1);
@@ -162,7 +162,7 @@ impl HX8369 {
 
     pub fn fill(&mut self, color: Rgb565) {
         self.min_dirty_y = 0;
-        self.max_dirty_y = self.height;
+        self.max_dirty_y = self.height - 1;
         self.get_raw_buffer_mut()
             .iter_mut()
             .for_each(|p| *p = color);
@@ -210,6 +210,82 @@ impl DrawTarget for HX8369 {
                 self.get_raw_buffer_mut()[y * w + x] = p.1;
             }
         }
+        self.flush();
         Ok(())
     }
 }
+
+mod slint_impl {
+    use std::rc::Rc;
+    use std::time::Instant;
+
+    use super::HX8369;
+    use embedded_graphics::pixelcolor::raw::RawU16;
+    use embedded_graphics::prelude::{DrawTarget, Point, Size};
+    use embedded_graphics::primitives::Rectangle;
+    use slint::platform::software_renderer::{MinimalSoftwareWindow, Rgb565Pixel};
+    use slint::platform::{software_renderer as renderer, Platform};
+
+    pub struct Backend {
+        window: Rc<MinimalSoftwareWindow>,
+        start_time: Instant,
+    }
+
+    impl Backend {
+        pub fn new(window: Rc<MinimalSoftwareWindow>) -> Self {
+            Self {
+                window,
+                start_time: Instant::now(),
+            }
+        }
+    }
+
+    impl Platform for Backend {
+        fn create_window_adapter(
+            &self,
+        ) -> Result<Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError> {
+            // Since on MCUs, there can be only one window, just return a clone of self.window.
+            // We'll also use the same window in the event loop.
+            Ok(self.window.clone())
+        }
+
+        fn duration_since_start(&self) -> core::time::Duration {
+            self.start_time.elapsed()
+        }
+
+        // fn run_event_loop(&self) -> Result<(), slint::PlatformError>
+        fn debug_log(&self, arguments: core::fmt::Arguments) {
+            println!("Slint: {:?}", arguments);
+        }
+    }
+
+    pub struct DisplayWrapper<'a> {
+        pub display: &'a mut HX8369,
+        pub line_buffer: &'a mut [Rgb565Pixel; 800],
+    }
+
+    impl renderer::LineBufferProvider for &mut DisplayWrapper<'_> {
+        type TargetPixel = Rgb565Pixel;
+
+        fn process_line(
+            &mut self,
+            line: usize,
+            range: core::ops::Range<usize>,
+            render_fn: impl FnOnce(&mut [Self::TargetPixel]),
+        ) {
+            render_fn(&mut self.line_buffer[range.clone()]);
+
+            let _ = self.display.fill_contiguous(
+                &Rectangle::new(
+                    Point::new(range.start as _, line as _),
+                    Size::new(range.len() as _, 1),
+                ),
+                self.line_buffer[range.clone()]
+                    .iter()
+                    .map(|p| RawU16::new(p.0).into()),
+            );
+        }
+    }
+}
+
+pub use slint_impl::*;

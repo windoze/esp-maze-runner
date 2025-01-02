@@ -4,14 +4,24 @@
   "rust-analyzer.cargo.target": "xtensa-esp32s3-espidf",
   "cSpell.words": [
     "ALWAYSINTERNAL",
+    "embuild",
+    "espflash",
+    "espidf",
     "ESPPSRAM",
+    "ldproxy",
+    "libm",
     "LWIP",
+    "LXGW",
     "MALLOC",
+    "MBEDTLS",
     "MEMMAP",
     "MEMTEST",
     "pixelcolor",
     "PSRAM",
     "RODATA",
-    "SPIRAM"
+    "rustflags",
+    "SPIRAM",
+    "sysenv",
+    "xtensa"
   ]
 }

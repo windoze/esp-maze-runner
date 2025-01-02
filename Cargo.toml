@@ -34,9 +34,16 @@ esp-idf-svc = { version = "0.49.1", default-features = false }
 embedded-hal = { version = "1.0.0" }
 embedded-graphics = { version = "0.8.1" }
 rand = { version = "0.8" }
+slint = {version = "1.9.1", default-features = false, features = [
+    "compat-1-0",
+    "libm",
+    "unsafe-single-threaded",
+] }
+zune-jpeg = "0.4.14"
 
 [build-dependencies]
 embuild = "0.32.0"
+slint-build = "1.9.1"
 
 [[package.metadata.esp-idf-sys.extra_components]]
 component_dirs = ["hx8369"]
